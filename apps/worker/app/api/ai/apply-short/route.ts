@@ -1,44 +1,40 @@
-import { NextRequest, NextResponse } from "next/server";
+// apps/worker/app/api/ai/apply-short/route.ts
+import { NextRequest } from "next/server";
 import { sanity } from "../../../../lib/sanity";
+import { options204, withCorsJSON } from "../../../../lib/cors";
 
-const ORIGIN = process.env.STUDIO_ORIGIN || "http://localhost:3333";
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
-function cors(extra: Record<string, string> = {}) {
-  return {
-    "Access-Control-Allow-Origin": ORIGIN,
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
-    ...extra,
-  };
-}
-
-export async function OPTIONS() {
-  return new NextResponse(null, { headers: cors() });
+export function OPTIONS() {
+  return options204();
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const { docId } = (await req.json()) as { docId: string };
+    const { docId } = (await req.json()) as { docId?: string };
     if (!docId) {
-      return NextResponse.json(
-        { ok: false, error: "Missing docId" },
-        { status: 400, headers: cors({ "Content-Type": "application/json" }) }
-      );
+      return withCorsJSON({ ok: false, error: "Missing docId" }, 400);
     }
 
     // อ่านผลล่าสุดจาก aiPreview
-    const doc = await sanity.fetch(
-      `*[_id==$id][0]{ aiPreview }`,
-      { id: docId }
-    );
+    const doc = await sanity.fetch(`*[_id==$id][0]{ aiPreview }`, {
+      id: docId,
+    });
 
-    const shortText: string | undefined = doc?.aiPreview?.result?.short_description;
-    const metaText: string  | undefined = doc?.aiPreview?.result?.meta_description;
+    const shortText: string | undefined =
+      doc?.aiPreview?.result?.short_description;
+    const metaText: string | undefined =
+      doc?.aiPreview?.result?.meta_description;
 
     if (!shortText || !metaText) {
-      return NextResponse.json(
-        { ok: false, error: "No short/meta in aiPreview. Run short_generate first." },
-        { status: 400, headers: cors({ "Content-Type": "application/json" }) }
+      return withCorsJSON(
+        {
+          ok: false,
+          error: "No short/meta in aiPreview. Run short_generate first.",
+        },
+        400
       );
     }
 
@@ -52,14 +48,18 @@ export async function POST(req: NextRequest) {
       })
       .commit();
 
-    return NextResponse.json(
-      { ok: true, resId: (res as any)?._id, applied: { shortDescription: shortText, seoDescription: metaText } },
-      { headers: cors({ "Content-Type": "application/json" }) }
-    );
+    return withCorsJSON({
+      ok: true,
+      resId: (res as any)?._id,
+      applied: {
+        shortDescription: shortText,
+        seoDescription: metaText,
+      },
+    });
   } catch (err: any) {
-    return NextResponse.json(
+    return withCorsJSON(
       { ok: false, error: err?.message || String(err) },
-      { status: 500, headers: cors({ "Content-Type": "application/json" }) }
+      500
     );
   }
 }

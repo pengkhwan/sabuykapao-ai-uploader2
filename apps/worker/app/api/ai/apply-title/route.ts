@@ -1,58 +1,59 @@
-﻿import { NextRequest, NextResponse } from "next/server";
+﻿// apps/worker/app/api/ai/apply-title/route.ts
+import { NextRequest } from "next/server";
 import { sanity } from "../../../../lib/sanity";
+import { options204, withCorsJSON } from "../../../../lib/cors";
 
-const ORIGIN = process.env.STUDIO_ORIGIN || "http://localhost:3333";
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
-function cors(extra: Record<string, string> = {}) {
-  return {
-    "Access-Control-Allow-Origin": ORIGIN,
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
-    ...extra,
-  };
-}
+const toPub = (id: string) =>
+  id && id.startsWith("drafts.") ? id.slice(7) : id;
 
-export async function OPTIONS() {
-  return new NextResponse(null, { headers: cors() });
+export function OPTIONS() {
+  return options204();
 }
 
 export async function POST(req: NextRequest) {
   try {
     const { docId, index = 0 } = (await req.json()) as {
-      docId: string;
+      docId?: string;
       index?: number;
     };
 
     if (!docId) {
-      return NextResponse.json(
-        { ok: false, error: "Missing docId" },
-        { status: 400, headers: cors({ "Content-Type": "application/json" }) }
-      );
+      return withCorsJSON({ ok: false, error: "Missing docId" }, 400);
     }
 
-    const doc = await sanity.fetch(`*[_id==$id][0]{ aiPreview }`, { id: docId });
+    const pubId = toPub(docId);
+
+    // อ่าน titles จาก aiPreview บนเอกสาร publish เสมอ
+    const doc = await sanity.fetch(`*[_id==$id][0]{ aiPreview }`, { id: pubId });
     const titles: string[] | undefined = doc?.aiPreview?.result?.titles;
 
     if (!Array.isArray(titles) || titles.length === 0) {
-      return NextResponse.json(
+      return withCorsJSON(
         { ok: false, error: "No AI titles found on aiPreview" },
-        { status: 400, headers: cors({ "Content-Type": "application/json" }) }
+        400
       );
     }
 
     const i = Math.max(0, Math.min(Number(index ?? 0), titles.length - 1));
     const title = titles[i];
 
-    const res = await sanity.patch(docId).set({ name: title }).commit();
+    // เขียนกลับชื่อเรื่องไปที่เอกสาร publish
+    const res = await sanity.patch(pubId).set({ name: title }).commit();
 
-    return NextResponse.json(
-      { ok: true, appliedIndex: i, title, resId: (res as any)?._id },
-      { headers: cors({ "Content-Type": "application/json" }) }
-    );
+    return withCorsJSON({
+      ok: true,
+      appliedIndex: i,
+      title,
+      resId: (res as any)?._id,
+    });
   } catch (err: any) {
-    return NextResponse.json(
+    return withCorsJSON(
       { ok: false, error: err?.message || String(err) },
-      { status: 500, headers: cors({ "Content-Type": "application/json" }) }
+      500
     );
   }
 }

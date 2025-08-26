@@ -1,30 +1,27 @@
-import { NextRequest, NextResponse } from "next/server";
+// apps/worker/app/api/ai/apply-image-alt/route.ts
+import { NextRequest } from "next/server";
 import { sanity } from "../../../../lib/sanity";
+import { options204, withCorsJSON } from "../../../../lib/cors";
 
-const ORIGIN = process.env.STUDIO_ORIGIN || "http://localhost:3333";
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
-function cors(extra: Record<string, string> = {}) {
-  return {
-    "Access-Control-Allow-Origin": ORIGIN,
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
-    ...extra,
-  };
-}
+const toPub = (id: string) =>
+  id && id.startsWith("drafts.") ? id.slice(7) : id;
 
-export async function OPTIONS() {
-  return new NextResponse(null, { headers: cors() });
+export function OPTIONS() {
+  return options204();
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const { docId } = (await req.json()) as { docId: string };
+    const { docId } = (await req.json()) as { docId?: string };
     if (!docId) {
-      return NextResponse.json(
-        { ok: false, error: "Missing docId" },
-        { status: 400, headers: cors({ "Content-Type": "application/json" }) }
-      );
+      return withCorsJSON({ ok: false, error: "Missing docId" }, 400);
     }
+
+    const pubId = toPub(docId);
 
     // ตรวจว่ามีรูปหลัก และอ่านผล ALT จาก aiPreview
     const data = await sanity.fetch(
@@ -32,41 +29,42 @@ export async function POST(req: NextRequest) {
         "hasImage": defined(image.asset),
         aiPreview
       }`,
-      { id: docId }
+      { id: pubId }
     );
 
     if (!data) {
-      return NextResponse.json(
-        { ok: false, error: "Document not found" },
-        { status: 404, headers: cors({ "Content-Type": "application/json" }) }
-      );
+      return withCorsJSON({ ok: false, error: "Document not found" }, 404);
     }
     if (!data.hasImage) {
-      return NextResponse.json(
+      return withCorsJSON(
         { ok: false, error: "No main image to apply ALT" },
-        { status: 400, headers: cors({ "Content-Type": "application/json" }) }
+        400
       );
     }
 
     const alt: string | undefined = data?.aiPreview?.result?.image?.alt;
     if (!alt) {
-      return NextResponse.json(
-        { ok: false, error: "No ALT found in aiPreview. Run image_alt_rename first." },
-        { status: 400, headers: cors({ "Content-Type": "application/json" }) }
+      return withCorsJSON(
+        {
+          ok: false,
+          error: "No ALT found in aiPreview. Run image_alt_rename first.",
+        },
+        400
       );
     }
 
     // เขียนเฉพาะฟิลด์ย่อย เพื่อไม่ทับ asset อื่นๆ
-    const res = await sanity.patch(docId).set({ "image.alt": alt }).commit();
+    const res = await sanity.patch(pubId).set({ "image.alt": alt }).commit();
 
-    return NextResponse.json(
-      { ok: true, resId: (res as any)?._id, applied: { alt } },
-      { headers: cors({ "Content-Type": "application/json" }) }
-    );
+    return withCorsJSON({
+      ok: true,
+      resId: (res as any)?._id,
+      applied: { alt },
+    });
   } catch (err: any) {
-    return NextResponse.json(
+    return withCorsJSON(
       { ok: false, error: err?.message || String(err) },
-      { status: 500, headers: cors({ "Content-Type": "application/json" }) }
+      500
     );
   }
 }

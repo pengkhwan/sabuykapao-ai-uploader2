@@ -1,54 +1,52 @@
-import { NextRequest, NextResponse } from "next/server";
+// apps/worker/app/api/ai/apply-gallery-alts/route.ts
+import { NextRequest } from "next/server";
 import { sanity } from "../../../../lib/sanity";
+import { options204, withCorsJSON } from "../../../../lib/cors";
 
-const ORIGIN = process.env.STUDIO_ORIGIN || "http://localhost:3333";
-const cors = (extra: Record<string, string> = {}) => ({
-  "Access-Control-Allow-Origin": ORIGIN,
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-  ...extra,
-});
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
-export async function OPTIONS() {
-  return new NextResponse(null, { headers: cors() });
+const toPub = (id: string) =>
+  id && id.startsWith("drafts.") ? id.slice(7) : id;
+
+export function OPTIONS() {
+  return options204();
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const { docId } = (await req.json()) as { docId: string };
+    const { docId } = (await req.json()) as { docId?: string };
     if (!docId) {
-      return NextResponse.json(
-        { ok: false, error: "Missing docId" },
-        { status: 400, headers: cors({ "Content-Type": "application/json" }) }
-      );
+      return withCorsJSON({ ok: false, error: "Missing docId" }, 400);
     }
+
+    const pubId = toPub(docId);
 
     // อ่านรายการรูปและผลจาก aiPreview
     const data = await sanity.fetch(
       `*[_id==$id][0]{
-        "gallery": gallery[] {_key},
+        "gallery": coalesce(gallery, [])[]{ _key },
         aiPreview
       }`,
-      { id: docId }
+      { id: pubId }
     );
+
     if (!data) {
-      return NextResponse.json(
-        { ok: false, error: "Document not found" },
-        { status: 404, headers: cors({ "Content-Type": "application/json" }) }
-      );
+      return withCorsJSON({ ok: false, error: "Document not found" }, 404);
     }
 
     const suggestions: Array<{ key: string; alt: string }> =
       data?.aiPreview?.result?.gallery || [];
 
-    if (!Array.isArray(suggestions) || !suggestions.length) {
-      return NextResponse.json(
+    if (!Array.isArray(suggestions) || suggestions.length === 0) {
+      return withCorsJSON(
         {
           ok: false,
           error:
             "No gallery suggestions in aiPreview. Run gallery_alt_generate first.",
         },
-        { status: 400, headers: cors({ "Content-Type": "application/json" }) }
+        400
       );
     }
 
@@ -65,23 +63,24 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    if (!appliedCount) {
-      return NextResponse.json(
+    if (appliedCount === 0) {
+      return withCorsJSON(
         { ok: false, error: "No matching gallery items to apply." },
-        { status: 400, headers: cors({ "Content-Type": "application/json" }) }
+        400
       );
     }
 
-    const res = await sanity.patch(docId).set(sets).commit();
+    const res = await sanity.patch(pubId).set(sets).commit();
 
-    return NextResponse.json(
-      { ok: true, resId: (res as any)?._id, appliedCount },
-      { headers: cors({ "Content-Type": "application/json" }) }
-    );
+    return withCorsJSON({
+      ok: true,
+      resId: (res as any)?._id,
+      appliedCount,
+    });
   } catch (err: any) {
-    return NextResponse.json(
+    return withCorsJSON(
       { ok: false, error: err?.message || String(err) },
-      { status: 500, headers: cors({ "Content-Type": "application/json" }) }
+      500
     );
   }
 }

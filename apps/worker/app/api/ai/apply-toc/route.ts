@@ -1,16 +1,11 @@
 // apps/worker/app/api/ai/apply-toc/route.ts
+import { NextRequest } from "next/server";
+import { sanity } from "../../../../lib/sanity";
+import { options204, withCorsJSON } from "../../../../lib/cors";
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
-
-import { NextRequest, NextResponse } from "next/server";
-import { sanity } from "../../../../lib/sanity"; // ✅ ไม่มี /src/
-
-const CORS: Record<string, string> = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With",
-};
 
 const toPub = (id?: string) =>
   id && id.startsWith("drafts.") ? id.slice(7) : (id || "");
@@ -43,8 +38,7 @@ async function readTocFromPreview(docId: string) {
 }
 
 export function OPTIONS() {
-  // ให้ preflight ผ่านแน่ ๆ
-  return new NextResponse(null, { status: 204, headers: CORS });
+  return options204();
 }
 
 export async function POST(req: NextRequest) {
@@ -54,26 +48,17 @@ export async function POST(req: NextRequest) {
     try {
       json = await req.json();
     } catch {
-      return new NextResponse(
-        JSON.stringify({ ok: false, error: "Invalid JSON body" }),
-        { status: 400, headers: CORS }
-      );
+      return withCorsJSON({ ok: false, error: "Invalid JSON body" }, 400);
     }
 
     const docId = toPub(json?.docId);
     if (!docId) {
-      return new NextResponse(
-        JSON.stringify({ ok: false, error: "Missing docId" }),
-        { status: 400, headers: CORS }
-      );
+      return withCorsJSON({ ok: false, error: "Missing docId" }, 400);
     }
 
     const items = await readTocFromPreview(docId);
     if (!items.length) {
-      return new NextResponse(
-        JSON.stringify({ ok: false, error: "No TOC in aiPreview" }),
-        { status: 400, headers: CORS }
-      );
+      return withCorsJSON({ ok: false, error: "No TOC in aiPreview" }, 400);
     }
 
     // map ให้ตรง schema: array of { _type: "tocItem", label, anchorId }
@@ -90,20 +75,14 @@ export async function POST(req: NextRequest) {
       .set({ toc: mapped })
       .commit({ autoGenerateArrayKeys: true });
 
-    return new NextResponse(
-      JSON.stringify({ ok: true, count: mapped.length, id: (res as any)?._id }),
-      { status: 200, headers: CORS }
-    );
-  } catch (e: any) {
-    // โชว์รายละเอียดจาก Sanity ถ้ามี (ช่วยดีบัก "Failed to fetch")
-    const msg =
-      e?.responseBody?.toString?.() ||
-      e?.message ||
-      String(e);
-    console.error("[apply-toc] error:", msg);
-    return new NextResponse(JSON.stringify({ ok: false, error: msg }), {
-      status: 500,
-      headers: CORS,
+    return withCorsJSON({
+      ok: true,
+      count: mapped.length,
+      id: (res as any)?._id,
     });
+  } catch (e: any) {
+    const msg = e?.responseBody?.toString?.() || e?.message || String(e);
+    console.error("[apply-toc] error:", msg);
+    return withCorsJSON({ ok: false, error: msg }, 500);
   }
 }
