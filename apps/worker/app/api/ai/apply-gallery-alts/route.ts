@@ -7,11 +7,34 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const toPub = (id: string) =>
-  id && id.startsWith("drafts.") ? id.slice(7) : id;
+const toPub = (id?: string) =>
+  id && id.startsWith("drafts.") ? id.slice(7) : (id || "");
 
 export function OPTIONS() {
   return options204();
+}
+
+/** ---------- helpers: normalize ALT ---------- */
+function normalizeAlt(v: string): string {
+  const noHtml = v.replace(/<[^>]+>/g, " ");
+  const oneLine = noHtml.replace(/[\r\n]+/g, " ");
+  const noEmojis = oneLine.replace(
+    /[\u0000-\u001F\u007F-\u009F\u2000-\u200F\u2028\u2029\u2066-\u2069\uFE00-\uFE0F\uFFFD]/g,
+    " "
+  );
+  const collapsed = noEmojis.replace(/\s+/g, " ").trim();
+  return collapsed.replace(/^["'“”‘’]|["'“”‘’]$/g, "");
+}
+
+function clampAlt(v: string, maxWords = 16, maxChars = 120): string {
+  const norm = normalizeAlt(v);
+  if (!norm) return "";
+  const words = norm.split(" ").filter(Boolean);
+  const limitedWords = words.slice(0, maxWords).join(" ");
+  if (limitedWords.length <= maxChars) return limitedWords;
+  const slice = limitedWords.slice(0, maxChars + 1);
+  const sp = slice.lastIndexOf(" ");
+  return (sp > 40 ? slice.slice(0, sp) : slice.slice(0, maxChars)).trim();
 }
 
 export async function POST(req: NextRequest) {
@@ -36,7 +59,7 @@ export async function POST(req: NextRequest) {
       return withCorsJSON({ ok: false, error: "Document not found" }, 404);
     }
 
-    const suggestions: Array<{ key: string; alt: string }> =
+    const suggestions: Array<{ key?: string; alt?: string }> =
       data?.aiPreview?.result?.gallery || [];
 
     if (!Array.isArray(suggestions) || suggestions.length === 0) {
@@ -50,8 +73,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // สร้าง mapping key -> alt แล้ว set ทีละรายการ
-    const altByKey = new Map(suggestions.map((s) => [s.key, s.alt]));
+    // สร้าง mapping key -> alt (หลัง normalize+clamp)
+    const altByKey = new Map<string, string>();
+    for (const s of suggestions) {
+      if (!s?.key || typeof s.key !== "string") continue;
+      const cleaned = clampAlt(String(s.alt || ""), 16, 120);
+      if (cleaned) altByKey.set(s.key, cleaned);
+    }
+
     const sets: Record<string, string> = {};
     let appliedCount = 0;
 

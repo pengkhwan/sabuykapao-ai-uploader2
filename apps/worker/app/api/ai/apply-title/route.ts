@@ -7,11 +7,27 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const toPub = (id: string) =>
-  id && id.startsWith("drafts.") ? id.slice(7) : id;
+const toPub = (id?: string) =>
+  id && id.startsWith("drafts.") ? id.slice(7) : (id || "");
 
 export function OPTIONS() {
   return options204();
+}
+
+/** ---------- helpers: normalize & trim (≤60 chars) ---------- */
+function normalizeText(v: string): string {
+  const noHtml = v.replace(/<[^>]+>/g, " ");
+  const oneLine = noHtml.replace(/[\r\n]+/g, " ");
+  return oneLine.replace(/\s+/g, " ").trim();
+}
+
+function smartTrim(v: string, max = 60): string {
+  const s = normalizeText(v);
+  if (s.length <= max) return s;
+  const slice = s.slice(0, max + 1);
+  const sp = slice.lastIndexOf(" ");
+  if (sp >= 40) return s.slice(0, sp).trim();
+  return s.slice(0, max).trim();
 }
 
 export async function POST(req: NextRequest) {
@@ -39,10 +55,15 @@ export async function POST(req: NextRequest) {
     }
 
     const i = Math.max(0, Math.min(Number(index ?? 0), titles.length - 1));
-    const title = titles[i];
+    const rawTitle = titles[i];
+    const title = smartTrim(rawTitle, 60); // enforce ≤ 60
 
-    // เขียนกลับชื่อเรื่องไปที่เอกสาร publish
-    const res = await sanity.patch(pubId).set({ name: title }).commit();
+    // เขียนกลับ: name + seo.seoTitle
+    const res = await sanity
+      .patch(pubId)
+      .setIfMissing({ seo: { _type: "seo" } })
+      .set({ name: title, "seo.seoTitle": title })
+      .commit();
 
     return withCorsJSON({
       ok: true,

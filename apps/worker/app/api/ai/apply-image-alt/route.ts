@@ -7,11 +7,37 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const toPub = (id: string) =>
-  id && id.startsWith("drafts.") ? id.slice(7) : id;
+const toPub = (id?: string) =>
+  id && id.startsWith("drafts.") ? id.slice(7) : (id || "");
 
 export function OPTIONS() {
   return options204();
+}
+
+/** ---------- helpers: normalize ALT ---------- */
+// remove html, newlines, collapse spaces, strip surrounding quotes
+function normalizeAlt(v: string): string {
+  const noHtml = v.replace(/<[^>]+>/g, " ");
+  const oneLine = noHtml.replace(/[\r\n]+/g, " ");
+  // optionally strip most emoji/control chars (keep basic punctuation & latin/tha)
+  const noEmojis = oneLine.replace(
+    /[\u0000-\u001F\u007F-\u009F\u2000-\u200F\u2028\u2029\u2066-\u2069\uFE00-\uFE0F\uFFFD]/g,
+    " "
+  );
+  const collapsed = noEmojis.replace(/\s+/g, " ").trim();
+  return collapsed.replace(/^["'“”‘’]|["'“”‘’]$/g, "");
+}
+
+// cap by word count first (ALT should be short), then by characters
+function clampAlt(v: string, maxWords = 16, maxChars = 120): string {
+  const norm = normalizeAlt(v);
+  const words = norm.split(" ").filter(Boolean);
+  const limitedWords = words.slice(0, maxWords).join(" ");
+  if (limitedWords.length <= maxChars) return limitedWords;
+  // soft cut at last space before maxChars
+  const slice = limitedWords.slice(0, maxChars + 1);
+  const sp = slice.lastIndexOf(" ");
+  return (sp > 40 ? slice.slice(0, sp) : slice.slice(0, maxChars)).trim();
 }
 
 export async function POST(req: NextRequest) {
@@ -42,8 +68,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const alt: string | undefined = data?.aiPreview?.result?.image?.alt;
-    if (!alt) {
+    const altAI: string | undefined = data?.aiPreview?.result?.image?.alt;
+    if (!altAI) {
       return withCorsJSON(
         {
           ok: false,
@@ -52,6 +78,9 @@ export async function POST(req: NextRequest) {
         400
       );
     }
+
+    // ✅ Validation / Normalization
+    const alt = clampAlt(altAI, 16, 120);
 
     // เขียนเฉพาะฟิลด์ย่อย เพื่อไม่ทับ asset อื่นๆ
     const res = await sanity.patch(pubId).set({ "image.alt": alt }).commit();
