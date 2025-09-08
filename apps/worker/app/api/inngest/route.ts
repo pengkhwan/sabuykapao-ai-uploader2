@@ -1,3 +1,4 @@
+// apps/worker/app/api/inngest/route.ts
 import { serve } from "inngest/next";
 import { inngest } from "../../../src/inngest";
 
@@ -7,6 +8,7 @@ import {
   productImageAltRename,
   productGalleryAltGenerate,
   articleTocGenerate,
+  articleImageAltGenerate, // ⬅️ เพิ่ม handler สำหรับ ALT ของบทความ
 } from "../../../src/app/functions";
 
 export const { GET, POST, PUT } = serve({
@@ -17,5 +19,6 @@ export const { GET, POST, PUT } = serve({
     productImageAltRename,
     productGalleryAltGenerate,
     articleTocGenerate,
+    articleImageAltGenerate, // ⬅️ ลงทะเบียนฟังก์ชันให้ Inngest ใช้งาน
   ],
 });
